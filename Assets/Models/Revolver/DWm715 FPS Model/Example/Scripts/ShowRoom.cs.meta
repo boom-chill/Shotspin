@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 7b72362797c00de4a856d87386a12dd9
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 72033
+  packageName: Dan Wesson Model 715
+  packageVersion: 2.0.1
+  assetPath: Assets/3D Models/Props/Weapons/DWm715 FPS Model/Example/Scripts/ShowRoom.cs
+  uploadId: 741243

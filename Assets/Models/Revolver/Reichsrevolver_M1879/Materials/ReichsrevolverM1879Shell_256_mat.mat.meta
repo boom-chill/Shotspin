@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: a4cbe09903850594ca3fb30fc62208cd
+timeCreated: 1463931619
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 63609
+  packageName: Reichsrevolver M-1879
+  packageVersion: 1.0
+  assetPath: Assets/Reichsrevolver_M1879/Materials/ReichsrevolverM1879Shell_256_mat.mat
+  uploadId: 119474

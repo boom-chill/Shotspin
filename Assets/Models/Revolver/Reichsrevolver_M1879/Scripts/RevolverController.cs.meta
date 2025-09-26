@@ -1,0 +1,19 @@
+fileFormatVersion: 2
+guid: 8ba1eb098b83bdd49af0900e1d4ae815
+timeCreated: 1463495958
+licenseType: Store
+MonoImporter:
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 63609
+  packageName: Reichsrevolver M-1879
+  packageVersion: 1.0
+  assetPath: Assets/Reichsrevolver_M1879/Scripts/RevolverController.cs
+  uploadId: 119474

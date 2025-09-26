@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: da85ce98a277047408cecc6730c45bd7
+timeCreated: 1464163711
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 63609
+  packageName: Reichsrevolver M-1879
+  packageVersion: 1.0
+  assetPath: Assets/Reichsrevolver_M1879/Prefabs/ReichsrevolverM1879Shell.prefab
+  uploadId: 119474
