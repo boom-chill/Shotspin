@@ -75,9 +75,7 @@ public class GameManager : MonoBehaviour
 
         for (int i = 0; i < playerCount; i++)
         {
-            Debug.Log(i);
             float angle = (360f / playerCount) * i;
-            Debug.Log(angle);
 
             // Tính vị trí theo vòng tròn
             Vector3 position = new Vector3(
@@ -128,9 +126,9 @@ public class GameManager : MonoBehaviour
     {
         while (GetAlivePlayers().Count > 1)
         {
-            yield return StartCoroutine(RevolverPhase());
+            // yield return StartCoroutine(RevolverPhase());
 
-            yield return StartCoroutine(ActionPlayPhase());
+            yield return StartCoroutine(TurnPlayPhase());
 
             yield return StartCoroutine(ExecuteCardsPhase());
 
@@ -145,6 +143,39 @@ public class GameManager : MonoBehaviour
         // Game over
         GameOver();
     }
+
+    IEnumerator TurnPlayPhase()
+    {
+        Debug.Log("=== Turn Play Phase ===");
+
+        int startIndex = revolver.GetTargetPlayerIndex();
+
+        for (int i = 0; i < players.Count; i++)
+        {
+            int playerIndex = GetNextPlayerIndex(startIndex, i);
+            PlayerController player = players[playerIndex];
+
+            if (!player.IsAlive()) continue;
+
+            Debug.Log($"--- Player {player.playerId} turn ---");
+
+            // Chỉ cho player hiện tại dùng card/item
+            player.EnableItemUsage(true);
+            player.EnableCardSelection(true);
+
+            float timer = turnTimer;
+            while (timer > 0)
+            {
+                timer -= Time.deltaTime;
+                yield return null;
+            }
+
+            // Kết thúc lượt
+            player.EnableItemUsage(false);
+            player.EnableCardSelection(false);
+        }
+    }
+
 
     IEnumerator RevolverPhase()
     {

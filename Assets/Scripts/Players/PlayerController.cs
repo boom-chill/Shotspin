@@ -7,7 +7,7 @@ public class PlayerController : MonoBehaviour
     [Header("Player Stats")]
     public int playerId;
     public int currentHP;
-    public int maxHP = 4;
+    public int maxHP = 5;
     public int shellCount = 0;
 
     [Header("Hand & Items")]
@@ -24,19 +24,13 @@ public class PlayerController : MonoBehaviour
     public Transform itemSlotsTransform; // Vị trí items
 
     private bool canSelectCards = false;
-    private bool hasUsedItemThisRound = false;
+    private bool canUseItems = false;
 
-    // Components (2D setup với tiềm năng 3D)
-    private SpriteRenderer spriteRenderer;
-    private Rigidbody rb;
-    private BoxCollider boxCollider;
-
+    public Rigidbody rb;
     void Awake()
     {
         // Setup components cho 2D với constraints cho 3D tương lai
-        spriteRenderer = GetComponent<SpriteRenderer>();
         rb = GetComponent<Rigidbody>();
-        boxCollider = GetComponent<BoxCollider>();
 
         // Constrain Y axis cho 2D gameplay trên X-Z plane
         if (rb != null)
@@ -80,15 +74,27 @@ public class PlayerController : MonoBehaviour
         UpdateHandVisual();
     }
 
-    public void EnableCardSelection(bool enable)
+    public void OnItemClicked(Item item)
     {
-        canSelectCards = enable;
-
-        // Enable/disable click cho cards
-        foreach (var card in handCards)
+        if (!canUseItems)
         {
-            card.SetSelectable(enable);
+            Debug.Log($"[Player {playerId}] Cannot use item!");
+            return;
         }
+
+        item.UseItem();
+    }
+
+
+    public void OnCardClicked(Card card)
+    {
+        if (!canSelectCards)
+        {
+            Debug.Log($"[Player {playerId}] Cannot play card!");
+            return;
+        }
+
+        card.PlayCard();
     }
 
     public bool TryPlayCard(Card card)
@@ -112,29 +118,6 @@ public class PlayerController : MonoBehaviour
         }
 
         return false;
-    }
-
-    public IEnumerator ItemUsePhase()
-    {
-        if (hasUsedItemThisRound || items.Count == 0)
-        {
-            yield return new WaitForSeconds(0.1f);
-            yield break;
-        }
-
-        Debug.Log($"Player {playerId} - Item use phase (3 seconds)");
-
-        // Enable item usage
-        EnableItemUsage(true);
-
-        float timer = 3f;
-        while (timer > 0 && !hasUsedItemThisRound)
-        {
-            timer -= Time.deltaTime;
-            yield return null;
-        }
-
-        EnableItemUsage(false);
     }
 
     public IEnumerator ExecutePlayedCards()
@@ -232,8 +215,15 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    public void EnableCardSelection(bool enable)
+    {
+        canSelectCards = enable;
+    }
+
     public void EnableItemUsage(bool enable)
     {
+        canUseItems = enable;
+
         for (int i = items.Count - 1; i >= 0; i--)
         {
             if (items[i] == null)
@@ -262,8 +252,6 @@ public class PlayerController : MonoBehaviour
             Destroy(card.gameObject);
         }
         playedCards.Clear();
-
-        hasUsedItemThisRound = false;
 
         UpdateHandVisual();
     }

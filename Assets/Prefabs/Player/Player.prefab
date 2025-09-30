@@ -1512,17 +1512,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerId: 0
   currentHP: 0
-  maxHP: 4
+  maxHP: 5
   shellCount: 0
   playedCards: []
   handCards: []
   items: []
-  maxHandSize: 5
+  maxHandSize: 6
   maxItems: 3
   maxPlayedCards: 3
   handTransform: {fileID: 6244168328044891272}
   playedCardsTransform: {fileID: 5791724815223066585}
   itemSlotsTransform: {fileID: 5604384808153072157}
+  rb: {fileID: 0}
 --- !u!1 &5868980156185091859
 GameObject:
   m_ObjectHideFlags: 0

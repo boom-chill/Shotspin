@@ -16,17 +16,22 @@ public class HeadLook : MonoBehaviour
 
     bool isLooking = false;
     private Camera mainCamera;
+    private PlayerController playerController;
 
     void Start()
     {
-        Debug.Log("MainCamera = " + mainCamera);
+        playerController = GetComponentInParent<PlayerController>();
+        if (playerController == null)
+        {
+            Debug.LogError("[HeadLook] Không tìm thấy PlayerController trong cha!");
+        }
+
+        mainCamera = Camera.main;
         Cursor.lockState = CursorLockMode.Locked;
 
         Vector3 e = transform.localEulerAngles;
         pitch = e.x;
         yaw = e.y;
-
-        mainCamera = Camera.main;
     }
 
     void Update()
@@ -84,14 +89,13 @@ public class HeadLook : MonoBehaviour
                 Item item = hit.collider.GetComponentInParent<Item>();
                 if (item != null)
                 {
-                    item.UseItem();
+                    playerController.OnItemClicked(item);
                 }
-
 
                 Card card = hit.collider.GetComponentInParent<Card>();
                 if (card != null)
                 {
-                    card.PlayCard();
+                    playerController.OnCardClicked(card);
                 }
             }
             else
