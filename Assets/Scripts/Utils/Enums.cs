@@ -45,7 +45,7 @@ public enum GamePhase
 }
 
 [System.Serializable]
-public struct PlayerNetworkData : INetworkSerializable
+public struct PlayerNetworkData : INetworkSerializable, System.IEquatable<PlayerNetworkData>
 {
     public ulong clientId;
     public int playerId;
@@ -57,4 +57,56 @@ public struct PlayerNetworkData : INetworkSerializable
         serializer.SerializeValue(ref playerId);
         serializer.SerializeValue(ref isReady);
     }
+
+    public bool Equals(PlayerNetworkData other)
+    {
+        return clientId == other.clientId
+            && playerId == other.playerId
+            && isReady == other.isReady;
+    }
+
+    // Nếu bạn muốn .Contains() hay so sánh bằng == tiện lợi hơn
+    public override bool Equals(object obj)
+    {
+        return obj is PlayerNetworkData other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return clientId.GetHashCode() ^ playerId.GetHashCode() ^ isReady.GetHashCode();
+    }
 }
+
+// [System.Serializable]
+// public struct NetworkBullet : INetworkSerializable, System.IEquatable<NetworkBullet>
+// {
+//     public BulletType bulletType;
+
+//     public NetworkBullet(BulletType type)
+//     {
+//         bulletType = type;
+//     }
+
+//     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+//     {
+//         serializer.SerializeValue(ref bulletType);
+//     }
+
+//     public bool Equals(NetworkBullet other)
+//     {
+//         return bulletType == other.bulletType;
+//     }
+
+//     public override bool Equals(object obj)
+//     {
+//         return obj is NetworkBullet other && Equals(other);
+//     }
+
+//     public override int GetHashCode()
+//     {
+//         return bulletType.GetHashCode();
+//     }
+
+//     public static implicit operator BulletType(NetworkBullet nb) => nb.bulletType;
+//     public static implicit operator NetworkBullet(BulletType bt) => new NetworkBullet(bt);
+// }

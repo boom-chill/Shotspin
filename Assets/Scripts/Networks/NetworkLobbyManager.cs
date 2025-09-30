@@ -1,182 +1,345 @@
-// using Unity.Netcode;
-// using UnityEngine;
-// using UnityEngine.UI;
-// using UnityEngine.SceneManagement;
+using UnityEngine;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
+using System.Collections.Generic;
+using UnityEngine.UI;
+using TMPro;
 
-// public class SimpleLobbyManager : MonoBehaviour
-// {
-//     [Header("UI References")]
-//     public Button hostButton;
-//     public Button joinButton;
-//     public InputField ipInputField;
-//     public Text statusText;
-//     public GameObject lobbyPanel;
-//     public GameObject gamePanel;
+// ====================== NETWORK LOBBY MANAGER ======================
+public class NetworkLobbyManager : MonoBehaviour
+{
+    [Header("Lobby UI")]
+    public GameObject lobbyPanel;
+    public GameObject gamePanel;
 
-//     [Header("Lobby Settings")]
-//     public int maxPlayers = 6;
-//     public string gameplaySceneName = "GamePlay";
+    [Header("Player Slots")]
+    public Button player1Button; // Host
+    public Button player2Button; // Client
+    public Button player3Button; // Client
+    public Button player4Button; // Client
+    public Button startGameButton;
+    public Button leaveButton;
 
-//     void Start()
-//     {
-//         // Setup button listeners
-//         hostButton.onClick.AddListener(StartHost);
-//         joinButton.onClick.AddListener(StartClient);
+    public TextMeshProUGUI[] playerSlotTexts = new TextMeshProUGUI[4];
+    public Image[] playerSlotImages = new Image[4];
 
-//         // Default IP
-//         ipInputField.text = "127.0.0.1";
+    [Header("Connection Info")]
+    public TMP_InputField ipAddressInput;
+    public TextMeshProUGUI connectionStatusText;
 
-//         UpdateStatusText("Ready to connect");
-//     }
+    [Header("Colors")]
+    public Color emptySlotColor = Color.gray;
+    public Color occupiedSlotColor = Color.green;
+    public Color localPlayerColor = Color.yellow;
 
-//     public void StartHost()
-//     {
-//         UpdateStatusText("Starting host...");
+    private Dictionary<ulong, int> playerSlots = new Dictionary<ulong, int>();
+    private int localPlayerSlot = -1;
 
-//         // Configure transport
-//         var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-//         transport.SetConnectionData("127.0.0.1", 7777);
+    public static NetworkLobbyManager Instance;
 
-//         // Start host
-//         bool success = NetworkManager.Singleton.StartHost();
+    void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+        }
+    }
 
-//         if (success)
-//         {
-//             UpdateStatusText($"Host started! Waiting for players... (0/{maxPlayers})");
-//             ShowLobby();
+    void Start()
+    {
+        SetupButtons();
+        UpdateLobbyUI();
 
-//             // Subscribe to connection events
-//             NetworkManager.Singleton.OnClientConnectedCallback += OnPlayerConnected;
-//             NetworkManager.Singleton.OnClientDisconnectCallback += OnPlayerDisconnected;
-//         }
-//         else
-//         {
-//             UpdateStatusText("Failed to start host!");
-//         }
-//     }
+        // Set default IP
+        if (ipAddressInput != null)
+        {
+            ipAddressInput.text = "127.0.0.1";
+        }
 
-//     public void StartClient()
-//     {
-//         UpdateStatusText("Connecting to server...");
+        // Subscribe to network events
+        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+        NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+    }
 
-//         // Configure transport with input IP
-//         var transport = NetworkManager.Singleton.GetComponent<Unity.Netcode.Transports.UTP.UnityTransport>();
-//         transport.SetConnectionData(ipInputField.text, 7777);
+    void SetupButtons()
+    {
+        player1Button.onClick.AddListener(() => JoinSlot(0, true));  // Host
+        player2Button.onClick.AddListener(() => JoinSlot(1, false)); // Client
+        player3Button.onClick.AddListener(() => JoinSlot(2, false)); // Client
+        player4Button.onClick.AddListener(() => JoinSlot(3, false)); // Client
 
-//         // Start client
-//         bool success = NetworkManager.Singleton.StartClient();
+        startGameButton.onClick.AddListener(StartGame);
+        leaveButton.onClick.AddListener(LeaveLobby);
 
-//         if (success)
-//         {
-//             UpdateStatusText("Connecting...");
+        startGameButton.gameObject.SetActive(false);
+        leaveButton.gameObject.SetActive(false);
+    }
 
-//             // Subscribe to events
-//             NetworkManager.Singleton.OnClientConnectedCallback += OnConnectedToServer;
-//             NetworkManager.Singleton.OnClientDisconnectCallback += OnDisconnectedFromServer;
-//         }
-//         else
-//         {
-//             UpdateStatusText("Failed to start client!");
-//         }
-//     }
+    void JoinSlot(int slotIndex, bool isHost)
+    {
+        // Check if slot is occupied
+        foreach (var slot in playerSlots)
+        {
+            if (slot.Value == slotIndex)
+            {
+                UpdateStatus("Slot already occupied!");
+                return;
+            }
+        }
 
-//     void OnPlayerConnected(ulong clientId)
-//     {
-//         if (NetworkManager.Singleton.IsHost)
-//         {
-//             int connectedCount = NetworkManager.Singleton.ConnectedClients.Count;
-//             UpdateStatusText($"Player joined! ({connectedCount}/{maxPlayers})");
+        localPlayerSlot = slotIndex;
 
-//             // Auto-start game when minimum players reached
-//             if (connectedCount >= 2)
-//             {
-//                 StartCoroutine(StartGameCountdown());
-//             }
-//         }
-//     }
+        if (isHost)
+        {
+            StartHost();
+        }
+        else
+        {
+            StartClient();
+        }
+    }
 
-//     void OnPlayerDisconnected(ulong clientId)
-//     {
-//         if (NetworkManager.Singleton.IsHost)
-//         {
-//             int connectedCount = NetworkManager.Singleton.ConnectedClients.Count;
-//             UpdateStatusText($"Player left ({connectedCount}/{maxPlayers})");
-//         }
-//     }
+    void StartHost()
+    {
+        NetworkManager.Singleton.StartHost();
+        UpdateStatus("Started as Host");
 
-//     void OnConnectedToServer(ulong clientId)
-//     {
-//         if (NetworkManager.Singleton.IsClient && !NetworkManager.Singleton.IsHost)
-//         {
-//             UpdateStatusText("Connected to server! Waiting for game to start...");
-//             ShowLobby();
-//         }
-//     }
+        // Host takes slot 0
+        RequestSlotServerRpc(0);
 
-//     void OnDisconnectedFromServer(ulong clientId)
-//     {
-//         if (NetworkManager.Singleton.IsClient)
-//         {
-//             UpdateStatusText("Disconnected from server!");
-//             ShowMainMenu();
-//         }
-//     }
+        startGameButton.gameObject.SetActive(true);
+        leaveButton.gameObject.SetActive(true);
 
-//     System.Collections.IEnumerator StartGameCountdown()
-//     {
-//         for (int i = 5; i > 0; i--)
-//         {
-//             UpdateStatusText($"Starting game in {i}...");
-//             yield return new WaitForSeconds(1f);
-//         }
+        DisableSlotButtons();
+    }
 
-//         // Load gameplay scene for all clients
-//         if (NetworkManager.Singleton.IsHost)
-//         {
-//             NetworkManager.Singleton.SceneManager.LoadScene(gameplaySceneName, LoadSceneMode.Single);
-//         }
-//     }
+    void StartClient()
+    {
+        var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
+        transport.SetConnectionData(ipAddressInput.text, 7777);
 
-//     void ShowMainMenu()
-//     {
-//         lobbyPanel.SetActive(false);
-//         gamePanel.SetActive(false);
-//         hostButton.gameObject.SetActive(true);
-//         joinButton.gameObject.SetActive(true);
-//     }
+        NetworkManager.Singleton.StartClient();
+        UpdateStatus($"Connecting to {ipAddressInput.text}...");
 
-//     void ShowLobby()
-//     {
-//         lobbyPanel.SetActive(true);
-//         hostButton.gameObject.SetActive(false);
-//         joinButton.gameObject.SetActive(false);
-//     }
+        // Request slot after connection
+        StartCoroutine(RequestSlotAfterConnection());
 
-//     void UpdateStatusText(string message)
-//     {
-//         if (statusText != null)
-//         {
-//             statusText.text = message;
-//             Debug.Log($"Lobby Status: {message}");
-//         }
-//     }
+        leaveButton.gameObject.SetActive(true);
+        DisableSlotButtons();
+    }
 
-//     public void Disconnect()
-//     {
-//         NetworkManager.Singleton.Shutdown();
-//         ShowMainMenu();
-//         UpdateStatusText("Disconnected");
-//     }
+    System.Collections.IEnumerator RequestSlotAfterConnection()
+    {
+        while (!NetworkManager.Singleton.IsConnectedClient)
+        {
+            yield return null;
+        }
 
-//     void OnDestroy()
-//     {
-//         // Cleanup event subscriptions
-//         if (NetworkManager.Singleton != null)
-//         {
-//             NetworkManager.Singleton.OnClientConnectedCallback -= OnPlayerConnected;
-//             NetworkManager.Singleton.OnClientDisconnectCallback -= OnPlayerDisconnected;
-//             NetworkManager.Singleton.OnClientConnectedCallback -= OnConnectedToServer;
-//             NetworkManager.Singleton.OnClientDisconnectCallback -= OnDisconnectedFromServer;
-//         }
-//     }
-// }
+        RequestSlotServerRpc(localPlayerSlot);
+        UpdateStatus($"Connected as Player {localPlayerSlot + 1}");
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestSlotServerRpc(int requestedSlot, ServerRpcParams rpcParams = default)
+    {
+        ulong clientId = rpcParams.Receive.SenderClientId;
+
+        // Check if slot is available
+        bool slotAvailable = true;
+        foreach (var slot in playerSlots)
+        {
+            if (slot.Value == requestedSlot)
+            {
+                slotAvailable = false;
+                break;
+            }
+        }
+
+        if (slotAvailable)
+        {
+            playerSlots[clientId] = requestedSlot;
+            UpdateLobbyClientRpc(clientId, requestedSlot, true);
+        }
+        else
+        {
+            // Find next available slot
+            for (int i = 0; i < 4; i++)
+            {
+                bool isOccupied = false;
+                foreach (var slot in playerSlots)
+                {
+                    if (slot.Value == i)
+                    {
+                        isOccupied = true;
+                        break;
+                    }
+                }
+
+                if (!isOccupied)
+                {
+                    playerSlots[clientId] = i;
+                    UpdateLobbyClientRpc(clientId, i, true);
+                    break;
+                }
+            }
+        }
+    }
+
+    [ClientRpc]
+    void UpdateLobbyClientRpc(ulong clientId, int slotIndex, bool joined)
+    {
+        if (joined)
+        {
+            playerSlots[clientId] = slotIndex;
+        }
+        else
+        {
+            playerSlots.Remove(clientId);
+        }
+
+        UpdateLobbyUI();
+    }
+
+    void UpdateLobbyUI()
+    {
+        // Reset all slots
+        for (int i = 0; i < 4; i++)
+        {
+            playerSlotTexts[i].text = $"Player {i + 1}\nEmpty";
+            playerSlotImages[i].color = emptySlotColor;
+        }
+
+        // Update occupied slots
+        foreach (var slot in playerSlots)
+        {
+            int index = slot.Value;
+            playerSlotTexts[index].text = $"Player {index + 1}\nReady";
+
+            if (NetworkManager.Singleton.LocalClientId == slot.Key)
+            {
+                playerSlotImages[index].color = localPlayerColor;
+                playerSlotTexts[index].text = $"Player {index + 1}\n(You)";
+            }
+            else
+            {
+                playerSlotImages[index].color = occupiedSlotColor;
+            }
+        }
+
+        // Update start button visibility (only for host)
+        if (NetworkManager.Singleton.IsHost)
+        {
+            startGameButton.interactable = playerSlots.Count >= 2;
+        }
+    }
+
+    void StartGame()
+    {
+        if (!NetworkManager.Singleton.IsHost) return;
+
+        if (playerSlots.Count < 2)
+        {
+            UpdateStatus("Need at least 2 players to start!");
+            return;
+        }
+
+        // Send game start signal to all clients
+        StartGameClientRpc();
+    }
+
+    [ClientRpc]
+    void StartGameClientRpc()
+    {
+        lobbyPanel.SetActive(false);
+        gamePanel.SetActive(true);
+
+        // Initialize game for all clients
+        if (NetworkManager.Singleton.IsHost)
+        {
+            NetworkGameManager.Instance.InitializeGame(playerSlots);
+        }
+    }
+
+    void LeaveLobby()
+    {
+        if (NetworkManager.Singleton.IsHost)
+        {
+            NetworkManager.Singleton.Shutdown();
+        }
+        else
+        {
+            NetworkManager.Singleton.Shutdown();
+        }
+
+        playerSlots.Clear();
+        localPlayerSlot = -1;
+
+        lobbyPanel.SetActive(true);
+        gamePanel.SetActive(false);
+        startGameButton.gameObject.SetActive(false);
+        leaveButton.gameObject.SetActive(false);
+
+        EnableSlotButtons();
+        UpdateLobbyUI();
+        UpdateStatus("Left lobby");
+    }
+
+    void OnClientConnected(ulong clientId)
+    {
+        Debug.Log($"Client {clientId} connected");
+        UpdateStatus($"Client {clientId} connected");
+    }
+
+    void OnClientDisconnected(ulong clientId)
+    {
+        Debug.Log($"Client {clientId} disconnected");
+
+        if (playerSlots.ContainsKey(clientId))
+        {
+            int slot = playerSlots[clientId];
+            playerSlots.Remove(clientId);
+            UpdateLobbyClientRpc(clientId, slot, false);
+        }
+
+        UpdateStatus($"Client {clientId} disconnected");
+    }
+
+    void DisableSlotButtons()
+    {
+        player1Button.interactable = false;
+        player2Button.interactable = false;
+        player3Button.interactable = false;
+        player4Button.interactable = false;
+    }
+
+    void EnableSlotButtons()
+    {
+        player1Button.interactable = true;
+        player2Button.interactable = true;
+        player3Button.interactable = true;
+        player4Button.interactable = true;
+    }
+
+    void UpdateStatus(string message)
+    {
+        if (connectionStatusText != null)
+        {
+            connectionStatusText.text = message;
+        }
+        Debug.Log($"[Lobby] {message}");
+    }
+
+    void OnDestroy()
+    {
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+        }
+    }
+}
