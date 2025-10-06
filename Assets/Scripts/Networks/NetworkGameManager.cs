@@ -38,11 +38,12 @@ public class NetworkGameManager : NetworkBehaviour
         if (Instance == null)
         {
             Instance = this;
-            networkPlayers = new NetworkList<PlayerNetworkData>();
+            DontDestroyOnLoad(gameObject);
         }
         else
         {
             Destroy(gameObject);
+            return;
         }
     }
 

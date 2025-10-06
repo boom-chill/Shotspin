@@ -59,7 +59,7 @@ public class GameManager : MonoBehaviour
         // revolver = revolverObj.GetComponent<RevolverManager>();
 
         // Tạo players quanh bàn (demo với 4 người)
-        CreatePlayers(4);
+        CreatePlayers(0);
 
         // Khởi tạo turn manager
         turnManager = GetComponent<TurnManager>();
@@ -265,7 +265,9 @@ public class GameManager : MonoBehaviour
 
     void GameOver()
     {
-        var winner = GetAlivePlayers()[0];
+        int playerCount = players.Count;
+        if (playerCount == 0) return;
+        PlayerController winner = GetAlivePlayers()[0];
         Debug.Log($"Game Over! Winner: Player {winner.playerId}");
     }
 

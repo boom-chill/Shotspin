@@ -1,22 +1,59 @@
 using UnityEngine;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
-using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine.UI;
 using TMPro;
+using System;
+using UnityEngine.SceneManagement;
+using System.Collections;
+using System.Collections.Generic;
+
+// ====================== LOBBY PLAYER DATA ======================
+public struct LobbyPlayerData : INetworkSerializable, IEquatable<LobbyPlayerData>
+{
+    public ulong ClientId;
+    public int SlotIndex;
+    public FixedString64Bytes PlayerName;
+    public bool IsReady;
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref ClientId);
+        serializer.SerializeValue(ref SlotIndex);
+        serializer.SerializeValue(ref PlayerName);
+        serializer.SerializeValue(ref IsReady);
+    }
+
+    public bool Equals(LobbyPlayerData other)
+    {
+        return ClientId == other.ClientId &&
+               SlotIndex == other.SlotIndex &&
+               PlayerName.Equals(other.PlayerName) &&
+               IsReady == other.IsReady;
+    }
+
+    public override bool Equals(object obj)
+    {
+        return obj is LobbyPlayerData other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(ClientId, SlotIndex, PlayerName, IsReady);
+    }
+}
 
 // ====================== NETWORK LOBBY MANAGER ======================
-public class NetworkLobbyManager : MonoBehaviour
+public class NetworkLobbyManager : NetworkBehaviour
 {
     [Header("Lobby UI")]
     public GameObject lobbyPanel;
     public GameObject gamePanel;
 
     [Header("Player Slots")]
-    public Button player1Button; // Host
-    public Button player2Button; // Client
-    public Button player3Button; // Client
-    public Button player4Button; // Client
+    public Button hostButton;
+    public Button JoinButton;
     public Button startGameButton;
     public Button leaveButton;
 
@@ -27,13 +64,17 @@ public class NetworkLobbyManager : MonoBehaviour
     public TMP_InputField ipAddressInput;
     public TextMeshProUGUI connectionStatusText;
 
+    [Header("Player Info")]
+    public TMP_InputField playerNameInput;
+    private string localPlayerName = "Player";
+
     [Header("Colors")]
     public Color emptySlotColor = Color.gray;
     public Color occupiedSlotColor = Color.green;
     public Color localPlayerColor = Color.yellow;
 
-    private Dictionary<ulong, int> playerSlots = new Dictionary<ulong, int>();
-    private int localPlayerSlot = -1;
+    private NetworkList<LobbyPlayerData> lobbyPlayers;
+    private bool isLoadingScene = false;
 
     public static NetworkLobbyManager Instance;
 
@@ -47,7 +88,10 @@ public class NetworkLobbyManager : MonoBehaviour
         else
         {
             Destroy(gameObject);
+            return;
         }
+
+        lobbyPlayers = new NetworkList<LobbyPlayerData>();
     }
 
     void Start()
@@ -55,24 +99,77 @@ public class NetworkLobbyManager : MonoBehaviour
         SetupButtons();
         UpdateLobbyUI();
 
-        // Set default IP
         if (ipAddressInput != null)
         {
             ipAddressInput.text = "127.0.0.1";
         }
+    }
 
-        // Subscribe to network events
-        NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
-        NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+
+        if (IsServer)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
+
+            // Subscribe to scene load events
+            NetworkManager.Singleton.SceneManager.OnLoadEventCompleted += OnLoadEventCompleted;
+            NetworkManager.Singleton.SceneManager.OnSynchronizeComplete += OnSynchronizeComplete;
+
+            foreach (var client in NetworkManager.Singleton.ConnectedClientsList)
+            {
+                if (!IsPlayerInLobby(client.ClientId))
+                {
+                    OnClientConnected(client.ClientId);
+                }
+            }
+        }
+
+        if (IsClient)
+        {
+            RegisterPlayerNameServerRpc(NetworkManager.Singleton.LocalClientId, localPlayerName);
+
+            // Subscribe to scene events for clients
+            NetworkManager.Singleton.SceneManager.OnSceneEvent += OnSceneEvent;
+        }
+
+        lobbyPlayers.OnListChanged += OnLobbyPlayersChanged;
+        UpdateLobbyUI();
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        base.OnNetworkDespawn();
+
+        if (NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
+            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+
+            if (IsServer)
+            {
+                NetworkManager.Singleton.SceneManager.OnLoadEventCompleted -= OnLoadEventCompleted;
+                NetworkManager.Singleton.SceneManager.OnSynchronizeComplete -= OnSynchronizeComplete;
+            }
+
+            if (IsClient)
+            {
+                NetworkManager.Singleton.SceneManager.OnSceneEvent -= OnSceneEvent;
+            }
+        }
+
+        if (lobbyPlayers != null)
+        {
+            lobbyPlayers.OnListChanged -= OnLobbyPlayersChanged;
+        }
     }
 
     void SetupButtons()
     {
-        player1Button.onClick.AddListener(() => JoinSlot(0, true));  // Host
-        player2Button.onClick.AddListener(() => JoinSlot(1, false)); // Client
-        player3Button.onClick.AddListener(() => JoinSlot(2, false)); // Client
-        player4Button.onClick.AddListener(() => JoinSlot(3, false)); // Client
-
+        hostButton.onClick.AddListener(StartHost);
+        JoinButton.onClick.AddListener(StartClient);
         startGameButton.onClick.AddListener(StartGame);
         leaveButton.onClick.AddListener(LeaveLobby);
 
@@ -80,207 +177,248 @@ public class NetworkLobbyManager : MonoBehaviour
         leaveButton.gameObject.SetActive(false);
     }
 
-    void JoinSlot(int slotIndex, bool isHost)
-    {
-        // Check if slot is occupied
-        foreach (var slot in playerSlots)
-        {
-            if (slot.Value == slotIndex)
-            {
-                UpdateStatus("Slot already occupied!");
-                return;
-            }
-        }
-
-        localPlayerSlot = slotIndex;
-
-        if (isHost)
-        {
-            StartHost();
-        }
-        else
-        {
-            StartClient();
-        }
-    }
-
     void StartHost()
     {
+        localPlayerName = string.IsNullOrWhiteSpace(playerNameInput.text) ? "Host" : playerNameInput.text;
+
         NetworkManager.Singleton.StartHost();
         UpdateStatus("Started as Host");
 
-        // Host takes slot 0
-        RequestSlotServerRpc(0);
-
         startGameButton.gameObject.SetActive(true);
         leaveButton.gameObject.SetActive(true);
-
         DisableSlotButtons();
     }
 
     void StartClient()
     {
+        localPlayerName = string.IsNullOrWhiteSpace(playerNameInput.text) ? "Client" : playerNameInput.text;
+
         var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
         transport.SetConnectionData(ipAddressInput.text, 7777);
 
         NetworkManager.Singleton.StartClient();
         UpdateStatus($"Connecting to {ipAddressInput.text}...");
 
-        // Request slot after connection
-        StartCoroutine(RequestSlotAfterConnection());
-
         leaveButton.gameObject.SetActive(true);
         DisableSlotButtons();
     }
 
-    System.Collections.IEnumerator RequestSlotAfterConnection()
+    void OnClientConnected(ulong clientId)
     {
-        while (!NetworkManager.Singleton.IsConnectedClient)
+        if (!IsServer) return;
+
+        Debug.Log($"[SERVER] Client {clientId} connected");
+
+        if (IsPlayerInLobby(clientId))
         {
-            yield return null;
+            Debug.LogWarning($"[SERVER] Client {clientId} already in lobby");
+            return;
         }
 
-        RequestSlotServerRpc(localPlayerSlot);
-        UpdateStatus($"Connected as Player {localPlayerSlot + 1}");
+        int slotIndex = FindEmptySlot();
+        if (slotIndex == -1)
+        {
+            Debug.LogWarning($"[SERVER] No empty slots for client {clientId}");
+            return;
+        }
+
+        lobbyPlayers.Add(new LobbyPlayerData
+        {
+            ClientId = clientId,
+            SlotIndex = slotIndex,
+            PlayerName = $"Player {clientId}",
+            IsReady = false
+        });
+
+        Debug.Log($"[SERVER] Added client {clientId} to slot {slotIndex}");
+        LogLobbyPlayers();
     }
 
-    [ServerRpc(RequireOwnership = false)]
-    void RequestSlotServerRpc(int requestedSlot, ServerRpcParams rpcParams = default)
+    void OnClientDisconnected(ulong clientId)
     {
-        ulong clientId = rpcParams.Receive.SenderClientId;
+        if (!IsServer) return;
 
-        // Check if slot is available
-        bool slotAvailable = true;
-        foreach (var slot in playerSlots)
+        Debug.Log($"[SERVER] Client {clientId} disconnected");
+
+        for (int i = 0; i < lobbyPlayers.Count; i++)
         {
-            if (slot.Value == requestedSlot)
+            if (lobbyPlayers[i].ClientId == clientId)
             {
-                slotAvailable = false;
+                lobbyPlayers.RemoveAt(i);
+                Debug.Log($"[SERVER] Removed client {clientId} from lobby");
                 break;
             }
         }
 
-        if (slotAvailable)
-        {
-            playerSlots[clientId] = requestedSlot;
-            UpdateLobbyClientRpc(clientId, requestedSlot, true);
-        }
-        else
-        {
-            // Find next available slot
-            for (int i = 0; i < 4; i++)
-            {
-                bool isOccupied = false;
-                foreach (var slot in playerSlots)
-                {
-                    if (slot.Value == i)
-                    {
-                        isOccupied = true;
-                        break;
-                    }
-                }
-
-                if (!isOccupied)
-                {
-                    playerSlots[clientId] = i;
-                    UpdateLobbyClientRpc(clientId, i, true);
-                    break;
-                }
-            }
-        }
+        UpdateStatus($"Client {clientId} disconnected");
     }
 
-    [ClientRpc]
-    void UpdateLobbyClientRpc(ulong clientId, int slotIndex, bool joined)
+    void OnLobbyPlayersChanged(NetworkListEvent<LobbyPlayerData> changeEvent)
     {
-        if (joined)
-        {
-            playerSlots[clientId] = slotIndex;
-        }
-        else
-        {
-            playerSlots.Remove(clientId);
-        }
-
+        Debug.Log($"[CLIENT {NetworkManager.LocalClientId}] Lobby changed: {changeEvent.Type}");
         UpdateLobbyUI();
+        LogLobbyPlayers();
     }
 
     void UpdateLobbyUI()
     {
-        // Reset all slots
         for (int i = 0; i < 4; i++)
         {
             playerSlotTexts[i].text = $"Player {i + 1}\nEmpty";
-            playerSlotImages[i].color = emptySlotColor;
-        }
-
-        // Update occupied slots
-        foreach (var slot in playerSlots)
-        {
-            int index = slot.Value;
-            playerSlotTexts[index].text = $"Player {index + 1}\nReady";
-
-            if (NetworkManager.Singleton.LocalClientId == slot.Key)
+            if (playerSlotImages[i] != null)
             {
-                playerSlotImages[index].color = localPlayerColor;
-                playerSlotTexts[index].text = $"Player {index + 1}\n(You)";
-            }
-            else
-            {
-                playerSlotImages[index].color = occupiedSlotColor;
+                playerSlotImages[i].color = emptySlotColor;
             }
         }
 
-        // Update start button visibility (only for host)
-        if (NetworkManager.Singleton.IsHost)
+        foreach (var player in lobbyPlayers)
         {
-            startGameButton.interactable = playerSlots.Count >= 2;
+            int slotIndex = player.SlotIndex;
+            if (slotIndex >= 0 && slotIndex < 4)
+            {
+                string readyText = player.IsReady ? "Ready" : "Not Ready";
+                playerSlotTexts[slotIndex].text = $"{player.PlayerName}\n{readyText}";
+
+                if (NetworkManager.Singleton != null &&
+                    NetworkManager.Singleton.LocalClientId == player.ClientId)
+                {
+                    playerSlotTexts[slotIndex].text = $"{player.PlayerName}\n(You)";
+                    if (playerSlotImages[slotIndex] != null)
+                    {
+                        playerSlotImages[slotIndex].color = localPlayerColor;
+                    }
+                }
+                else if (playerSlotImages[slotIndex] != null)
+                {
+                    playerSlotImages[slotIndex].color = occupiedSlotColor;
+                }
+            }
+        }
+
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsHost)
+        {
+            startGameButton.interactable = lobbyPlayers.Count >= 2;
         }
     }
 
     void StartGame()
     {
-        if (!NetworkManager.Singleton.IsHost) return;
+        if (!IsHost) return;
 
-        if (playerSlots.Count < 2)
+        if (lobbyPlayers.Count < 2)
         {
             UpdateStatus("Need at least 2 players to start!");
             return;
         }
 
-        // Send game start signal to all clients
-        StartGameClientRpc();
+        if (isLoadingScene)
+        {
+            Debug.LogWarning("[Lobby] Already loading scene!");
+            return;
+        }
+
+        isLoadingScene = true;
+        UpdateStatus("Loading Game Scene...");
+
+        // Hide lobby UI on all clients
+        HideLobbyUIClientRpc();
+
+        // Load scene using NetworkSceneManager (this will sync to all clients)
+        Debug.Log("[HOST] Starting scene load to GameScene");
+        var status = NetworkManager.Singleton.SceneManager.LoadScene("GameScene", LoadSceneMode.Single);
+
+        if (status != SceneEventProgressStatus.Started)
+        {
+            Debug.LogError($"[HOST] Failed to start scene load! Status: {status}");
+            isLoadingScene = false;
+            UpdateStatus("Failed to load scene!");
+        }
     }
 
     [ClientRpc]
-    void StartGameClientRpc()
+    void HideLobbyUIClientRpc()
     {
-        lobbyPanel.SetActive(false);
-        gamePanel.SetActive(true);
-
-        // Initialize game for all clients
-        if (NetworkManager.Singleton.IsHost)
+        if (lobbyPanel != null)
         {
-            NetworkGameManager.Instance.InitializeGame(playerSlots);
+            lobbyPanel.SetActive(false);
         }
+        Debug.Log($"[Client {NetworkManager.Singleton.LocalClientId}] Lobby UI hidden");
+    }
+
+    // Server-side: called when scene load completes
+    void OnLoadEventCompleted(string sceneName, LoadSceneMode loadSceneMode, List<ulong> clientsCompleted, List<ulong> clientsTimedOut)
+    {
+        if (!IsServer) return;
+
+        Debug.Log($"[SERVER] Scene '{sceneName}' loaded. Completed: {clientsCompleted.Count}, TimedOut: {clientsTimedOut.Count}");
+
+        if (sceneName == "GameScene")
+        {
+            isLoadingScene = false;
+
+            // Initialize game after scene loads
+            StartCoroutine(WaitForGameManagerThenInit());
+        }
+    }
+
+    // Server-side: called when a client finishes synchronizing
+    void OnSynchronizeComplete(ulong clientId)
+    {
+        Debug.Log($"[SERVER] Client {clientId} synchronized with scene");
+    }
+
+    // Client-side: called during scene loading process
+    void OnSceneEvent(SceneEvent sceneEvent)
+    {
+        if (!IsClient) return;
+
+        var clientId = NetworkManager.Singleton.LocalClientId;
+
+        switch (sceneEvent.SceneEventType)
+        {
+            case SceneEventType.Load:
+                Debug.Log($"[Client {clientId}] Loading scene: {sceneEvent.SceneName}");
+                break;
+            case SceneEventType.LoadComplete:
+                Debug.Log($"[Client {clientId}] Scene load complete: {sceneEvent.SceneName}");
+                break;
+            case SceneEventType.Synchronize:
+                Debug.Log($"[Client {clientId}] Synchronizing scene: {sceneEvent.SceneName}");
+                break;
+            case SceneEventType.SynchronizeComplete:
+                Debug.Log($"[Client {clientId}] Scene synchronization complete: {sceneEvent.SceneName}");
+                break;
+        }
+    }
+
+    private IEnumerator WaitForGameManagerThenInit()
+    {
+        Debug.Log("[SERVER] Waiting for NetworkGameManager...");
+
+        // Wait for NetworkGameManager to exist
+        yield return new WaitUntil(() => NetworkGameManager.Instance != null);
+
+        Debug.Log("[SERVER] NetworkGameManager found! Initializing game...");
+
+        var playerSlots = new Dictionary<ulong, int>();
+        foreach (var player in lobbyPlayers)
+        {
+            playerSlots[player.ClientId] = player.SlotIndex;
+        }
+
+        NetworkGameManager.Instance.InitializeGame(playerSlots);
     }
 
     void LeaveLobby()
     {
-        if (NetworkManager.Singleton.IsHost)
-        {
-            NetworkManager.Singleton.Shutdown();
-        }
-        else
-        {
-            NetworkManager.Singleton.Shutdown();
-        }
+        NetworkManager.Singleton.Shutdown();
 
-        playerSlots.Clear();
-        localPlayerSlot = -1;
+        if (IsServer)
+        {
+            lobbyPlayers.Clear();
+        }
 
         lobbyPanel.SetActive(true);
-        gamePanel.SetActive(false);
         startGameButton.gameObject.SetActive(false);
         leaveButton.gameObject.SetActive(false);
 
@@ -289,40 +427,45 @@ public class NetworkLobbyManager : MonoBehaviour
         UpdateStatus("Left lobby");
     }
 
-    void OnClientConnected(ulong clientId)
+    bool IsPlayerInLobby(ulong clientId)
     {
-        Debug.Log($"Client {clientId} connected");
-        UpdateStatus($"Client {clientId} connected");
+        foreach (var player in lobbyPlayers)
+        {
+            if (player.ClientId == clientId)
+                return true;
+        }
+        return false;
     }
 
-    void OnClientDisconnected(ulong clientId)
+    int FindEmptySlot()
     {
-        Debug.Log($"Client {clientId} disconnected");
-
-        if (playerSlots.ContainsKey(clientId))
+        for (int i = 0; i < 4; i++)
         {
-            int slot = playerSlots[clientId];
-            playerSlots.Remove(clientId);
-            UpdateLobbyClientRpc(clientId, slot, false);
+            bool slotTaken = false;
+            foreach (var player in lobbyPlayers)
+            {
+                if (player.SlotIndex == i)
+                {
+                    slotTaken = true;
+                    break;
+                }
+            }
+            if (!slotTaken)
+                return i;
         }
-
-        UpdateStatus($"Client {clientId} disconnected");
+        return -1;
     }
 
     void DisableSlotButtons()
     {
-        player1Button.interactable = false;
-        player2Button.interactable = false;
-        player3Button.interactable = false;
-        player4Button.interactable = false;
+        hostButton.interactable = false;
+        JoinButton.interactable = false;
     }
 
     void EnableSlotButtons()
     {
-        player1Button.interactable = true;
-        player2Button.interactable = true;
-        player3Button.interactable = true;
-        player4Button.interactable = true;
+        hostButton.interactable = true;
+        JoinButton.interactable = true;
     }
 
     void UpdateStatus(string message)
@@ -334,12 +477,57 @@ public class NetworkLobbyManager : MonoBehaviour
         Debug.Log($"[Lobby] {message}");
     }
 
-    void OnDestroy()
+    void LogLobbyPlayers()
     {
-        if (NetworkManager.Singleton != null)
+        if (lobbyPlayers == null || lobbyPlayers.Count == 0)
         {
-            NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnected;
-            NetworkManager.Singleton.OnClientDisconnectCallback -= OnClientDisconnected;
+            Debug.Log("[LobbyPlayers] (empty)");
+            return;
+        }
+
+        string log = "[LobbyPlayers] ";
+        foreach (var player in lobbyPlayers)
+        {
+            log += $"[ClientId={player.ClientId}, Slot={player.SlotIndex}, Name={player.PlayerName}] ";
+        }
+        Debug.Log(log);
+    }
+
+    public void ToggleReady()
+    {
+        if (!NetworkManager.Singleton.IsConnectedClient) return;
+        ToggleReadyServerRpc(NetworkManager.Singleton.LocalClientId);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void ToggleReadyServerRpc(ulong clientId)
+    {
+        for (int i = 0; i < lobbyPlayers.Count; i++)
+        {
+            if (lobbyPlayers[i].ClientId == clientId)
+            {
+                var player = lobbyPlayers[i];
+                player.IsReady = !player.IsReady;
+                lobbyPlayers[i] = player;
+                Debug.Log($"[SERVER] Client {clientId} ready state: {player.IsReady}");
+                break;
+            }
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RegisterPlayerNameServerRpc(ulong clientId, string playerName)
+    {
+        for (int i = 0; i < lobbyPlayers.Count; i++)
+        {
+            if (lobbyPlayers[i].ClientId == clientId)
+            {
+                var player = lobbyPlayers[i];
+                player.PlayerName = playerName;
+                lobbyPlayers[i] = player;
+                Debug.Log($"[SERVER] Updated name for {clientId}: {playerName}");
+                return;
+            }
         }
     }
 }

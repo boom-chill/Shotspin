@@ -16,5 +16,5 @@ MonoBehaviour:
   description: "H\u1ED3i 1 HP"
   itemPrefab: {fileID: 1179789650271714, guid: c4f215913007cb0468a3e34c8982192b, type: 3}
   itemType: 6
-  shellCost: 4
-  tier: 4
+  shellCost: 5
+  tier: 5

@@ -1423,6 +1423,8 @@ GameObject:
   - component: {fileID: 3015346589609139230}
   - component: {fileID: 5642776023800725343}
   - component: {fileID: 8197228649054518348}
+  - component: {fileID: 4152965721884185312}
+  - component: {fileID: 3835053816673097577}
   - component: {fileID: -4835803971686713947}
   m_Layer: 0
   m_Name: Player
@@ -1498,7 +1500,7 @@ CapsuleCollider:
   m_Height: 16.704847
   m_Direction: 1
   m_Center: {x: 0.15704882, y: 8.449208, z: 0.32980192}
---- !u!114 &-4835803971686713947
+--- !u!114 &4152965721884185312
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -1506,6 +1508,61 @@ MonoBehaviour:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5690733904030198616}
   m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  GlobalObjectIdHash: 2036493079
+  InScenePlacedSourceGlobalObjectIdHash: 0
+  DeferredDespawnTick: 0
+  Ownership: 1
+  AlwaysReplicateAsRoot: 0
+  SynchronizeTransform: 1
+  ActiveSceneSynchronization: 0
+  SceneMigrationSynchronization: 1
+  SpawnWithObservers: 1
+  DontDestroyWithOwner: 0
+  AutoObjectParentSync: 1
+  SyncOwnerTransformWhenParented: 1
+  AllowOwnerToParent: 0
+--- !u!114 &3835053816673097577
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5690733904030198616}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 00a6ebebc6d08bc438f8c4befd97a0b6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  ShowTopMostFoldoutHeaderGroup: 1
+  playerId:
+    m_InternalValue: 0
+  currentHP:
+    m_InternalValue: 0
+  maxHP:
+    m_InternalValue: 5
+  shellCount:
+    m_InternalValue: 0
+  playedCards: []
+  handCards: []
+  items: []
+  maxHandSize: 7
+  maxItems: 3
+  maxPlayedCards: 3
+  handTransform: {fileID: 6244168328044891272}
+  playedCardsTransform: {fileID: 5791724815223066585}
+  itemSlotsTransform: {fileID: 5604384808153072157}
+--- !u!114 &-4835803971686713947
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5690733904030198616}
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ae9768852efc373479b2b2f02e755109, type: 3}
   m_Name: 
@@ -1517,7 +1574,7 @@ MonoBehaviour:
   playedCards: []
   handCards: []
   items: []
-  maxHandSize: 6
+  maxHandSize: 7
   maxItems: 3
   maxPlayedCards: 3
   handTransform: {fileID: 6244168328044891272}

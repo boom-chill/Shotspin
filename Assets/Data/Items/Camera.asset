@@ -16,5 +16,5 @@ MonoBehaviour:
   description: "Xem b\xE0i c\u1EE7a 1 ng\u01B0\u1EDDi"
   itemPrefab: {fileID: 1395331180427821838, guid: e9896a9ce858a4c42917906d904981e5, type: 3}
   itemType: 0
-  shellCost: 1
-  tier: 1
+  shellCost: 2
+  tier: 2
