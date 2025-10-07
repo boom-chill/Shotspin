@@ -1,52 +1,8 @@
-// NetworkBullet.cs (put in same folder)
 using Unity.Netcode;
 using System;
-using Unity.Netcode;
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-
-
-[Serializable]
-public struct NetworkBullet : INetworkSerializable, IEquatable<NetworkBullet>
-{
-    public BulletType bulletType;
-
-    public NetworkBullet(BulletType t)
-    {
-        bulletType = t;
-    }
-
-    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
-    {
-        serializer.SerializeValue(ref bulletType);
-    }
-
-    public bool Equals(NetworkBullet other)
-    {
-        return bulletType == other.bulletType;
-    }
-
-    public override bool Equals(object obj)
-    {
-        return obj is NetworkBullet other && Equals(other);
-    }
-
-    public override int GetHashCode()
-    {
-        return bulletType.GetHashCode();
-    }
-
-    // convenient casts
-    public static implicit operator BulletType(NetworkBullet nb) => nb.bulletType;
-    public static implicit operator NetworkBullet(BulletType bt) => new NetworkBullet(bt);
-
-    public override string ToString()
-    {
-        return bulletType.ToString();
-    }
-}
-// NetworkRevolverManager.cs
 
 public class NetworkRevolverManager : NetworkBehaviour
 {
@@ -54,8 +10,8 @@ public class NetworkRevolverManager : NetworkBehaviour
     private NetworkVariable<int> currentSlot = new NetworkVariable<int>(0);
     public NetworkVariable<int> targetPlayerIndex = new NetworkVariable<int>(0);
 
-    // NetworkList for bullet slots synchronization
-    private NetworkList<NetworkBullet> bulletSlots;
+    // ✅ CRITICAL: Initialize NetworkList at declaration
+    private NetworkList<NetworkBullet> bulletSlots = new NetworkList<NetworkBullet>();
 
     [Header("Visual Components")]
     public Transform cylinder;
@@ -66,10 +22,11 @@ public class NetworkRevolverManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // Initialize NetworkList
-        bulletSlots = new NetworkList<NetworkBullet>();
+        base.OnNetworkSpawn();
 
-        // If we are server, initialize actual revolver state directly (do NOT call a ServerRpc from server)
+        Debug.Log($"[Revolver] OnNetworkSpawn called. IsServer: {IsServer}");
+
+        // If we are server, initialize actual revolver state
         if (IsServer)
         {
             InitializeRevolverOnServer();
@@ -80,23 +37,27 @@ public class NetworkRevolverManager : NetworkBehaviour
         targetPlayerIndex.OnValueChanged += OnTargetPlayerChanged;
         bulletSlots.OnListChanged += OnBulletSlotsChanged;
 
-        Debug.Log($"NetworkRevolver spawned. IsServer: {IsServer}");
+        Debug.Log($"[Revolver] NetworkRevolver spawned. IsServer: {IsServer}");
     }
 
     public override void OnNetworkDespawn()
     {
+        base.OnNetworkDespawn();
+
         currentSlot.OnValueChanged -= OnCurrentSlotChanged;
         targetPlayerIndex.OnValueChanged -= OnTargetPlayerChanged;
+
         if (bulletSlots != null)
+        {
             bulletSlots.OnListChanged -= OnBulletSlotsChanged;
+        }
     }
 
-    // --- server-only initializer (call directly from server)
     void InitializeRevolverOnServer()
     {
         if (!IsServer) return;
 
-        Debug.Log("Initializing network revolver (server) ...");
+        Debug.Log("[Revolver] Initializing revolver on server...");
 
         // Initialize 6 empty slots
         bulletSlots.Clear();
@@ -111,6 +72,8 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         currentSlot.Value = 0;
         targetPlayerIndex.Value = 0;
+
+        Debug.Log($"[Revolver] ✓ Initialized with bullet at slot {randomSlot}");
 
         // Show initial state to all clients
         ShowInitialStateClientRpc(randomSlot);
@@ -145,13 +108,13 @@ public class NetworkRevolverManager : NetworkBehaviour
 
     void OnCurrentSlotChanged(int oldSlot, int newSlot)
     {
-        Debug.Log($"Current slot changed: {oldSlot} → {newSlot}");
+        Debug.Log($"[Revolver] Current slot changed: {oldSlot} → {newSlot}");
         UpdateCylinderVisual();
     }
 
     void OnTargetPlayerChanged(int oldTarget, int newTarget)
     {
-        Debug.Log($"Target player changed: {oldTarget} → {newTarget}");
+        Debug.Log($"[Revolver] Target player changed: {oldTarget} → {newTarget}");
         UpdateAimLine();
     }
 
@@ -160,28 +123,20 @@ public class NetworkRevolverManager : NetworkBehaviour
         switch (changeEvent.Type)
         {
             case NetworkListEvent<NetworkBullet>.EventType.Add:
-                Debug.Log($"Bullet added: {changeEvent.Value}");
+                Debug.Log($"[Revolver] Bullet added: {changeEvent.Value}");
                 break;
 
             case NetworkListEvent<NetworkBullet>.EventType.Remove:
-                Debug.Log($"Bullet removed: {changeEvent.Value}");
+                Debug.Log($"[Revolver] Bullet removed: {changeEvent.Value}");
                 break;
 
             case NetworkListEvent<NetworkBullet>.EventType.Value:
-                Debug.Log($"Bullet changed at index {changeEvent.Index}: {changeEvent.PreviousValue} -> {changeEvent.Value}");
+                Debug.Log($"[Revolver] Bullet changed at index {changeEvent.Index}: {changeEvent.PreviousValue} -> {changeEvent.Value}");
                 break;
 
             case NetworkListEvent<NetworkBullet>.EventType.Clear:
-                Debug.Log("Bullet list cleared");
+                Debug.Log("[Revolver] Bullet list cleared");
                 break;
-        }
-
-        // Optional: update UI from the whole slots
-        if (bulletSlots.Count == 6)
-        {
-            var arr = new NetworkBullet[6];
-            for (int i = 0; i < 6; i++) arr[i] = bulletSlots[i];
-            // UIManager.Instance?.UpdateCylinderUI(arr, currentSlot.Value);
         }
 
         UpdateCylinderVisual();
@@ -193,7 +148,7 @@ public class NetworkRevolverManager : NetworkBehaviour
     {
         if (!IsServer) yield break;
 
-        Debug.Log($"Executing card effect: {cardType} by Player {executingPlayerId}");
+        Debug.Log($"[Revolver] Executing card effect: {cardType} by Player {executingPlayerId}");
 
         switch (cardType)
         {
@@ -243,7 +198,6 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         targetPlayerIndex.Value = (targetPlayerIndex.Value + direction + playerCount) % playerCount;
 
-        // Trigger barrel rotation animation
         RotateBarrelClientRpc(direction);
     }
 
@@ -255,7 +209,6 @@ public class NetworkRevolverManager : NetworkBehaviour
         if (bulletSlots.Count == 0) return;
         currentSlot.Value = (currentSlot.Value + direction + bulletSlots.Count) % bulletSlots.Count;
 
-        // Trigger cylinder rotation animation
         RotateCylinderClientRpc(direction);
     }
 
@@ -266,22 +219,21 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         if (slotIndex == -1)
         {
-            // Find first empty slot
             for (int i = 0; i < bulletSlots.Count; i++)
             {
                 if (bulletSlots[i].bulletType == BulletType.Empty)
                 {
                     bulletSlots[i] = new NetworkBullet(bulletType);
-                    Debug.Log($"Added {bulletType} bullet to slot {i}");
+                    Debug.Log($"[Revolver] Added {bulletType} bullet to slot {i}");
                     return;
                 }
             }
-            Debug.LogWarning("No empty slots available for bullet!");
+            Debug.LogWarning("[Revolver] No empty slots available for bullet!");
         }
         else if (slotIndex >= 0 && slotIndex < bulletSlots.Count)
         {
             bulletSlots[slotIndex] = new NetworkBullet(bulletType);
-            Debug.Log($"Added {bulletType} bullet to slot {slotIndex}");
+            Debug.Log($"[Revolver] Added {bulletType} bullet to slot {slotIndex}");
         }
     }
 
@@ -290,9 +242,8 @@ public class NetworkRevolverManager : NetworkBehaviour
     {
         if (!IsServer) return;
 
-        Debug.Log("Shuffling network cylinder...");
+        Debug.Log("[Revolver] Shuffling cylinder...");
 
-        // Collect all bullets
         var bullets = new List<NetworkBullet>();
         for (int i = 0; i < bulletSlots.Count; i++)
         {
@@ -303,7 +254,6 @@ public class NetworkRevolverManager : NetworkBehaviour
             bulletSlots[i] = new NetworkBullet(BulletType.Empty);
         }
 
-        // Redistribute randomly
         for (int i = 0; i < bullets.Count; i++)
         {
             int randomSlot;
@@ -316,10 +266,8 @@ public class NetworkRevolverManager : NetworkBehaviour
             bulletSlots[randomSlot] = bullets[i];
         }
 
-        // Random current slot
         currentSlot.Value = UnityEngine.Random.Range(0, bulletSlots.Count);
 
-        // Trigger shuffle animation
         ShuffleCylinderClientRpc();
     }
 
@@ -330,7 +278,6 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         NetworkBullet peeked = bulletSlots[currentSlot.Value];
 
-        // Send peek result only to the peeking player
         var networkPlayers = FindObjectsOfType<NetworkPlayerController>();
         foreach (var player in networkPlayers)
         {
@@ -358,14 +305,12 @@ public class NetworkRevolverManager : NetworkBehaviour
         if (currentSlot.Value >= bulletSlots.Count) yield break;
 
         NetworkBullet currentBullet = bulletSlots[currentSlot.Value];
-        Debug.Log($"Player {shootingPlayerId} shoots! Bullet: {currentBullet.bulletType}");
+        Debug.Log($"[Revolver] Player {shootingPlayerId} shoots! Bullet: {currentBullet.bulletType}");
 
-        // Trigger shoot animation on all clients
         ShootAnimationClientRpc();
 
         yield return new WaitForSeconds(0.5f);
 
-        // Find target player
         var networkPlayers = FindObjectsOfType<NetworkPlayerController>();
         NetworkPlayerController targetPlayer = null;
 
@@ -380,25 +325,20 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         if (targetPlayer == null) yield break;
 
-        // Process hit/miss
         if (currentBullet.bulletType != BulletType.Empty)
         {
             int damage = (currentBullet.bulletType == BulletType.Gold) ? 2 : 1;
             HitEffectClientRpc(targetPlayer.transform.position);
-            Debug.Log($"HIT! Player {shootingPlayerId} takes {damage} damage!");
-            // call targetPlayer.TakeDamageServerRpc(damage) etc.
+            Debug.Log($"[Revolver] HIT! Player {shootingPlayerId} takes {damage} damage!");
         }
         else
         {
             MissEffectClientRpc(targetPlayer.transform.position);
-            Debug.Log($"MISS! Player {shootingPlayerId} gets 1 shell reward!");
-            // call targetPlayer.AddShellsServerRpc(1) etc.
+            Debug.Log($"[Revolver] MISS! Player {shootingPlayerId} gets 1 shell reward!");
         }
 
-        // Remove bullet after shooting
         bulletSlots[currentSlot.Value] = new NetworkBullet(BulletType.Empty);
 
-        // Player chooses new direction (simplified - random for now)
         yield return new WaitForSeconds(1f);
         int newDirection = UnityEngine.Random.Range(0, 2) == 0 ? -1 : 1;
         RotateBarrelServerRpc(newDirection);
@@ -413,7 +353,6 @@ public class NetworkRevolverManager : NetworkBehaviour
         {
             StartCoroutine(RotateBarrelAnimation(direction));
         }
-        AudioManager.Instance?.PlayGunRotate();
     }
 
     [ClientRpc]
@@ -423,7 +362,6 @@ public class NetworkRevolverManager : NetworkBehaviour
         {
             StartCoroutine(RotateCylinderAnimation(direction));
         }
-        AudioManager.Instance?.PlayCylinderRotate();
     }
 
     [ClientRpc]
@@ -439,30 +377,24 @@ public class NetworkRevolverManager : NetworkBehaviour
     void ShootAnimationClientRpc()
     {
         if (shootEffect != null) shootEffect.Play();
-        AudioManager.Instance?.PlayGunShot();
-        VFXManager.Instance?.ShakeCamera(0.5f, 0.3f);
     }
 
-    // Accept a NetworkBullet and use ClientRpcParams to target clients
     [ClientRpc]
     void PeekResultClientRpc(NetworkBullet peekedBullet, ClientRpcParams clientRpcParams = default)
     {
-        Debug.Log($"Peeked bullet: {peekedBullet.bulletType}");
-        // UIManager.Instance?.ShowNotification($"Peeked: {peekedBullet.bulletType}", Color.cyan);
+        Debug.Log($"[Revolver] Peeked bullet: {peekedBullet.bulletType}");
     }
 
     [ClientRpc]
     void HitEffectClientRpc(Vector3 position)
     {
-        VFXManager.Instance?.PlayBloodEffect(position);
-        AudioManager.Instance?.PlaySFX(null);
+        Debug.Log($"[Revolver] Hit effect at {position}");
     }
 
     [ClientRpc]
     void MissEffectClientRpc(Vector3 position)
     {
-        VFXManager.Instance?.PlayShellSparkleEffect(position);
-        AudioManager.Instance?.PlayShellReward();
+        Debug.Log($"[Revolver] Miss effect at {position}");
     }
 
     // ====================== VISUAL UPDATES ======================
@@ -470,7 +402,6 @@ public class NetworkRevolverManager : NetworkBehaviour
     void UpdateCylinderVisual()
     {
         // Update cylinder visual representation
-        // This runs on all clients when network variables change
     }
 
     void UpdateAimLine()
@@ -498,8 +429,7 @@ public class NetworkRevolverManager : NetworkBehaviour
         }
     }
 
-    // ====================== ANIMATION COROUTINES ====================== (unchanged)
-    // ... (rotate/shuffle coroutines same as before)
+    // ====================== ANIMATION COROUTINES ======================
 
     System.Collections.IEnumerator RotateBarrelAnimation(int direction)
     {
