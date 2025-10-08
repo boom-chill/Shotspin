@@ -10,7 +10,6 @@ public class NetworkRevolverManager : NetworkBehaviour
     private NetworkVariable<int> currentSlot = new NetworkVariable<int>(0);
     public NetworkVariable<int> targetPlayerIndex = new NetworkVariable<int>(0);
 
-    // ✅ CRITICAL: Initialize NetworkList at declaration
     private NetworkList<NetworkBullet> bulletSlots = new NetworkList<NetworkBullet>();
 
     [Header("Visual Components")]
@@ -26,13 +25,11 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         Debug.Log($"[Revolver] OnNetworkSpawn called. IsServer: {IsServer}");
 
-        // If we are server, initialize actual revolver state
         if (IsServer)
         {
             InitializeRevolverOnServer();
         }
 
-        // Subscribe to network variable changes
         currentSlot.OnValueChanged += OnCurrentSlotChanged;
         targetPlayerIndex.OnValueChanged += OnTargetPlayerChanged;
         bulletSlots.OnListChanged += OnBulletSlotsChanged;
@@ -59,14 +56,12 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         Debug.Log("[Revolver] Initializing revolver on server...");
 
-        // Initialize 6 empty slots
         bulletSlots.Clear();
         for (int i = 0; i < 6; i++)
         {
             bulletSlots.Add(new NetworkBullet(BulletType.Empty));
         }
 
-        // Add initial random bullet
         int randomSlot = UnityEngine.Random.Range(0, 6);
         bulletSlots[randomSlot] = new NetworkBullet(BulletType.Normal);
 
@@ -75,7 +70,6 @@ public class NetworkRevolverManager : NetworkBehaviour
 
         Debug.Log($"[Revolver] ✓ Initialized with bullet at slot {randomSlot}");
 
-        // Show initial state to all clients
         ShowInitialStateClientRpc(randomSlot);
     }
 
@@ -85,7 +79,6 @@ public class NetworkRevolverManager : NetworkBehaviour
         Debug.Log($"=== Initial Revolver State (Network) ===");
         Debug.Log($"Initial bullet at slot {bulletSlot}");
 
-        // Visual feedback for initial reveal
         StartCoroutine(InitialRevealEffect());
     }
 
@@ -497,5 +490,48 @@ public class NetworkRevolverManager : NetworkBehaviour
         if (slot >= 0 && slot < bulletSlots.Count)
             return bulletSlots[slot].bulletType;
         return BulletType.Empty;
+    }
+
+    // ====================== MISSING METHODS - ADD THESE ======================
+
+    public void SetTargetPlayer(int playerIndex)
+    {
+        if (!IsServer) return;
+        
+        targetPlayerIndex.Value = playerIndex;
+        Debug.Log($"[Revolver] Target set to player {playerIndex}");
+    }
+
+    [ClientRpc]
+    public void RevealAllSlotsClientRpc()
+    {
+        Debug.Log("[Revolver] === Revealing All Bullet Slots ===");
+        
+        for (int i = 0; i < bulletSlots.Count; i++)
+        {
+            Debug.Log($"[Revolver] Slot {i}: {bulletSlots[i].bulletType}");
+        }
+        
+        StartCoroutine(RevealSlotsEffect());
+    }
+
+    System.Collections.IEnumerator RevealSlotsEffect()
+    {
+        if (cylinder != null)
+        {
+            var renderer = cylinder.GetComponent<SpriteRenderer>();
+            if (renderer != null)
+            {
+                Color original = renderer.color;
+                
+                for (int i = 0; i < 3; i++)
+                {
+                    renderer.color = Color.cyan;
+                    yield return new WaitForSeconds(0.3f);
+                    renderer.color = original;
+                    yield return new WaitForSeconds(0.3f);
+                }
+            }
+        }
     }
 }

@@ -2,13 +2,13 @@ using Unity.Netcode;
 using System;
 
 [Serializable]
-public struct NetworkBullet : INetworkSerializable, IEquatable<NetworkBullet>
+public struct NetworkBullet : INetworkSerializable, System.IEquatable<NetworkBullet>
 {
     public BulletType bulletType;
 
-    public NetworkBullet(BulletType t)
+    public NetworkBullet(BulletType type)
     {
-        bulletType = t;
+        bulletType = type;
     }
 
     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
@@ -28,12 +28,18 @@ public struct NetworkBullet : INetworkSerializable, IEquatable<NetworkBullet>
 
     public override int GetHashCode()
     {
-        return bulletType.GetHashCode();
+        return (int)bulletType;
     }
 
-    // convenient casts
-    public static implicit operator BulletType(NetworkBullet nb) => nb.bulletType;
-    public static implicit operator NetworkBullet(BulletType bt) => new NetworkBullet(bt);
+    public static bool operator ==(NetworkBullet left, NetworkBullet right)
+    {
+        return left.Equals(right);
+    }
+
+    public static bool operator !=(NetworkBullet left, NetworkBullet right)
+    {
+        return !left.Equals(right);
+    }
 
     public override string ToString()
     {

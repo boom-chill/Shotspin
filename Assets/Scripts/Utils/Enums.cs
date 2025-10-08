@@ -1,5 +1,7 @@
 using Unity.Netcode;
 
+// ====================== ENUMS ======================
+
 public enum BulletType
 {
     Empty,   // Trống
@@ -9,6 +11,7 @@ public enum BulletType
 
 public enum ItemType
 {
+    None,          // Thêm None cho empty slots
     Camera,        // Xem bài của 1 người (1 shell)
     Magnifier,     // Xem toàn bộ ổ đạn (1 shell)  
     LockBarrel,    // Vô hiệu hóa 1 turn (2 shells)
@@ -38,11 +41,15 @@ public enum CardType
 public enum GamePhase
 {
     Setup,
+    RevolverReveal,
     CardPlay,
     CardExecution,
     Shop,
+    DrawCards,
     GameOver
 }
+
+// ====================== NETWORK STRUCTS ======================
 
 [System.Serializable]
 public struct PlayerNetworkData : INetworkSerializable, System.IEquatable<PlayerNetworkData>
@@ -65,7 +72,6 @@ public struct PlayerNetworkData : INetworkSerializable, System.IEquatable<Player
             && isReady == other.isReady;
     }
 
-    // Nếu bạn muốn .Contains() hay so sánh bằng == tiện lợi hơn
     public override bool Equals(object obj)
     {
         return obj is PlayerNetworkData other && Equals(other);
@@ -73,40 +79,128 @@ public struct PlayerNetworkData : INetworkSerializable, System.IEquatable<Player
 
     public override int GetHashCode()
     {
-        return clientId.GetHashCode() ^ playerId.GetHashCode() ^ isReady.GetHashCode();
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 31 + clientId.GetHashCode();
+            hash = hash * 31 + playerId.GetHashCode();
+            hash = hash * 31 + isReady.GetHashCode();
+            return hash;
+        }
+    }
+
+    public static bool operator ==(PlayerNetworkData left, PlayerNetworkData right)
+    {
+        return left.Equals(right);
+    }
+
+    public static bool operator !=(PlayerNetworkData left, PlayerNetworkData right)
+    {
+        return !left.Equals(right);
     }
 }
 
-// [System.Serializable]
-// public struct NetworkBullet : INetworkSerializable, System.IEquatable<NetworkBullet>
-// {
-//     public BulletType bulletType;
+// ====================== NETWORK CARD DATA ======================
+[System.Serializable]
+public struct NetworkCardData : INetworkSerializable, System.IEquatable<NetworkCardData>
+{
+    public CardType cardType;
+    public int cardId;
 
-//     public NetworkBullet(BulletType type)
-//     {
-//         bulletType = type;
-//     }
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref cardType);
+        serializer.SerializeValue(ref cardId);
+    }
 
-//     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
-//     {
-//         serializer.SerializeValue(ref bulletType);
-//     }
+    public bool Equals(NetworkCardData other)
+    {
+        return cardType == other.cardType && cardId == other.cardId;
+    }
 
-//     public bool Equals(NetworkBullet other)
-//     {
-//         return bulletType == other.bulletType;
-//     }
+    public override bool Equals(object obj)
+    {
+        return obj is NetworkCardData other && Equals(other);
+    }
 
-//     public override bool Equals(object obj)
-//     {
-//         return obj is NetworkBullet other && Equals(other);
-//     }
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 31 + cardType.GetHashCode();
+            hash = hash * 31 + cardId.GetHashCode();
+            return hash;
+        }
+    }
 
-//     public override int GetHashCode()
-//     {
-//         return bulletType.GetHashCode();
-//     }
+    public static bool operator ==(NetworkCardData left, NetworkCardData right)
+    {
+        return left.Equals(right);
+    }
 
-//     public static implicit operator BulletType(NetworkBullet nb) => nb.bulletType;
-//     public static implicit operator NetworkBullet(BulletType bt) => new NetworkBullet(bt);
-// }
+    public static bool operator !=(NetworkCardData left, NetworkCardData right)
+    {
+        return !left.Equals(right);
+    }
+
+    public override string ToString()
+    {
+        return $"{cardType} (ID: {cardId})";
+    }
+}
+
+// ====================== NETWORK ITEM DATA ======================
+[System.Serializable]
+public struct NetworkItemData : INetworkSerializable, System.IEquatable<NetworkItemData>
+{
+    public ItemType itemType;
+    public int shellCost;
+    public int tier;
+    
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref itemType);
+        serializer.SerializeValue(ref shellCost);
+        serializer.SerializeValue(ref tier);
+    }
+
+    public bool Equals(NetworkItemData other)
+    {
+        return itemType == other.itemType 
+            && shellCost == other.shellCost 
+            && tier == other.tier;
+    }
+
+    public override bool Equals(object obj)
+    {
+        return obj is NetworkItemData other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        unchecked
+        {
+            int hash = 17;
+            hash = hash * 31 + itemType.GetHashCode();
+            hash = hash * 31 + shellCost.GetHashCode();
+            hash = hash * 31 + tier.GetHashCode();
+            return hash;
+        }
+    }
+
+    public static bool operator ==(NetworkItemData left, NetworkItemData right)
+    {
+        return left.Equals(right);
+    }
+
+    public static bool operator !=(NetworkItemData left, NetworkItemData right)
+    {
+        return !left.Equals(right);
+    }
+
+    public override string ToString()
+    {
+        return $"{itemType} - Tier {tier} ({shellCost} shells)";
+    }
+}

@@ -1,9 +1,6 @@
 using UnityEngine;
 using Unity.Netcode;
-using Unity.Netcode.Transports.UTP;
 using System.Collections.Generic;
-using UnityEngine.UI;
-using TMPro;
 
 public class NetworkGameManager : NetworkBehaviour
 {
@@ -11,11 +8,15 @@ public class NetworkGameManager : NetworkBehaviour
     public int maxPlayers = 4;
     public int startingHP = 4;
     public int startingCards = 2;
+    public float turnTimer = 25f;
 
     [Header("Prefab References")]
     public GameObject networkPlayerPrefab;
     public GameObject networkRevolverPrefab;
     public GameObject cardPrefab;
+
+    [Header("Card Database")]
+    public List<CardData> allCards = new List<CardData>();
 
     [Header("Network State")]
     public NetworkVariable<GamePhase> currentPhase = new NetworkVariable<GamePhase>(
@@ -30,6 +31,8 @@ public class NetworkGameManager : NetworkBehaviour
 
     private Dictionary<ulong, NetworkPlayerController> playerControllers = new Dictionary<ulong, NetworkPlayerController>();
     private NetworkRevolverManager networkRevolver;
+    private NetworkShopManager networkShopManager;
+    private NetworkDeckManager networkDeckManager;
 
     public static NetworkGameManager Instance;
 
@@ -63,10 +66,12 @@ public class NetworkGameManager : NetworkBehaviour
     {
         base.OnNetworkSpawn();
 
-        // Listen for spawned objects to track player controllers
         if (IsClient)
         {
             NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnectedToGame;
+            
+            // ✅ THÊM: Subscribe to phase changes
+            currentPhase.OnValueChanged += OnPhaseChangedClient;
         }
     }
 
@@ -78,12 +83,67 @@ public class NetworkGameManager : NetworkBehaviour
         {
             NetworkManager.Singleton.OnClientConnectedCallback -= OnClientConnectedToGame;
         }
+
+        // ✅ THÊM: Unsubscribe
+        currentPhase.OnValueChanged -= OnPhaseChangedClient;
     }
 
     void OnClientConnectedToGame(ulong clientId)
     {
         Debug.Log($"[GameManager] Client {clientId} connected to game scene");
     }
+
+    // ✅ THÊM: Client-side phase change handler
+    void OnPhaseChangedClient(GamePhase oldPhase, GamePhase newPhase)
+    {
+        if (!IsClient) return;
+
+        Debug.Log($"[Client {NetworkManager.Singleton.LocalClientId}] Phase changed: {oldPhase} → {newPhase}");
+
+        // Show UI feedback based on phase
+        switch (newPhase)
+        {
+            case GamePhase.Setup:
+                ShowPhaseUI("Game Starting...", Color.white);
+                break;
+
+            case GamePhase.RevolverReveal:
+                ShowPhaseUI("Revolver Reveal Phase", Color.yellow);
+                break;
+
+            case GamePhase.CardPlay:
+                ShowPhaseUI("Card Play Phase", Color.cyan);
+                break;
+
+            case GamePhase.CardExecution:
+                ShowPhaseUI("Card Execution Phase", Color.magenta);
+                break;
+
+            case GamePhase.Shop:
+                ShowPhaseUI("Shop Phase", Color.green);
+                break;
+
+            case GamePhase.DrawCards:
+                ShowPhaseUI("Draw Cards Phase", Color.blue);
+                break;
+
+            case GamePhase.GameOver:
+                ShowPhaseUI("Game Over!", Color.red);
+                break;
+        }
+    }
+
+    void ShowPhaseUI(string phaseName, Color color)
+    {
+        // TODO: Update actual UI
+        Debug.Log($"<color=#{ColorUtility.ToHtmlStringRGB(color)}>[PHASE] {phaseName}</color>");
+        
+        // Example: If you have a UI Text element
+        // phaseText.text = phaseName;
+        // phaseText.color = color;
+    }
+
+    // ====================== INITIALIZATION ======================
 
     public void InitializeGame(Dictionary<ulong, int> playerSlots)
     {
@@ -95,24 +155,15 @@ public class NetworkGameManager : NetworkBehaviour
 
         Debug.Log($"[GameManager] InitializeGame called with {playerSlots.Count} players");
 
-        // Validate prefabs
-        if (networkRevolverPrefab == null)
+        if (networkRevolverPrefab == null || networkPlayerPrefab == null)
         {
-            Debug.LogError("[GameManager] networkRevolverPrefab is NULL! Assign it in Inspector.");
+            Debug.LogError("[GameManager] Missing prefab references!");
             return;
         }
 
-        if (networkPlayerPrefab == null)
-        {
-            Debug.LogError("[GameManager] networkPlayerPrefab is NULL! Assign it in Inspector.");
-            return;
-        }
-
-        // Clear previous data
         if (networkPlayers != null)
         {
             networkPlayers.Clear();
-            Debug.Log("[GameManager] Cleared networkPlayers list");
         }
         else
         {
@@ -121,9 +172,8 @@ public class NetworkGameManager : NetworkBehaviour
         }
 
         playerControllers.Clear();
-        Debug.Log("[GameManager] Cleared playerControllers dictionary");
 
-        // Create revolver at center
+        // Create revolver
         Debug.Log("[GameManager] Creating revolver...");
         GameObject revolverObj = Instantiate(
             networkRevolverPrefab,
@@ -155,22 +205,32 @@ public class NetworkGameManager : NetworkBehaviour
         Debug.Log("[GameManager] Creating players...");
         CreateNetworkPlayers(playerSlots);
 
-        // Wait a frame for all spawns to complete, then notify clients
+        // Find managers
+        networkShopManager = FindObjectOfType<NetworkShopManager>();
+        networkDeckManager = FindObjectOfType<NetworkDeckManager>();
+
+        if (networkShopManager == null)
+            Debug.LogWarning("[GameManager] NetworkShopManager not found!");
+        if (networkDeckManager == null)
+            Debug.LogWarning("[GameManager] NetworkDeckManager not found!");
+
         StartCoroutine(WaitForSpawnsThenStart());
     }
 
     System.Collections.IEnumerator WaitForSpawnsThenStart()
     {
-        // Wait for all network spawns to complete
         yield return new WaitForSeconds(0.5f);
 
         Debug.Log($"[GameManager] All players spawned. Player count: {playerControllers.Count}");
+        
+        LogPlayers();
 
-        // Notify all clients that setup is complete
+        // ✅ THÊM: Notify clients về game start
         NotifyGameStartClientRpc();
 
-        // Start game loop
         yield return new WaitForSeconds(1f);
+        
+        // ✅ Server starts game loop
         StartCoroutine(NetworkGameLoop());
     }
 
@@ -185,7 +245,6 @@ public class NetworkGameManager : NetworkBehaviour
 
             Debug.Log($"[GameManager] Creating player for Client {clientId} in slot {slotIndex}");
 
-            // Calculate position
             float angle = (360f / 4) * slotIndex;
             Vector3 position = new Vector3(
                 Mathf.Cos(angle * Mathf.Deg2Rad) * radius,
@@ -193,42 +252,27 @@ public class NetworkGameManager : NetworkBehaviour
                 Mathf.Sin(angle * Mathf.Deg2Rad) * radius
             );
 
-            // Calculate rotation facing center
             Vector3 directionToCenter = (Vector3.zero - position).normalized;
             float targetY = Quaternion.LookRotation(directionToCenter, Vector3.up).eulerAngles.y;
             Quaternion rotation = Quaternion.Euler(0, targetY, 0);
 
-            // Instantiate player
             GameObject playerObj = Instantiate(networkPlayerPrefab, position, rotation);
 
-            // Get components before spawning
             NetworkObject netObj = playerObj.GetComponent<NetworkObject>();
             NetworkPlayerController controller = playerObj.GetComponent<NetworkPlayerController>();
 
-            if (netObj == null)
+            if (netObj == null || controller == null)
             {
-                Debug.LogError($"[GameManager] NetworkObject component missing on player prefab!");
+                Debug.LogError($"[GameManager] Missing components on player prefab!");
                 Destroy(playerObj);
                 continue;
             }
 
-            if (controller == null)
-            {
-                Debug.LogError($"[GameManager] NetworkPlayerController component missing on player prefab!");
-                Destroy(playerObj);
-                continue;
-            }
-
-            // Spawn as player object for specific client
             netObj.SpawnAsPlayerObject(clientId, true);
-
-            // Initialize controller
             controller.Initialize(slotIndex, startingHP, startingCards);
 
-            // Track controller
             playerControllers[clientId] = controller;
 
-            // Add to network list
             PlayerNetworkData data = new PlayerNetworkData
             {
                 clientId = clientId,
@@ -241,32 +285,33 @@ public class NetworkGameManager : NetworkBehaviour
         }
 
         Debug.Log($"[GameManager] Total players created: {playerControllers.Count}");
+        
+        if (networkRevolver != null)
+        {
+            networkRevolver.SetTargetPlayer(0);
+        }
     }
+
+    // ====================== CLIENT SETUP ======================
 
     [ClientRpc]
     void NotifyGameStartClientRpc()
     {
         Debug.Log($"[Client {NetworkManager.Singleton.LocalClientId}] Game started!");
-
-        // Find and setup local player
         StartCoroutine(FindAndSetupLocalPlayer());
     }
 
     System.Collections.IEnumerator FindAndSetupLocalPlayer()
     {
-        // Wait for player objects to be spawned on client
         yield return new WaitForSeconds(0.5f);
 
         ulong localClientId = NetworkManager.Singleton.LocalClientId;
-
-        // Find all NetworkPlayerController objects in scene
         NetworkPlayerController[] allPlayers = FindObjectsOfType<NetworkPlayerController>();
 
         Debug.Log($"[Client {localClientId}] Found {allPlayers.Length} player objects in scene");
 
         NetworkPlayerController localPlayer = null;
 
-        // Find the player that belongs to this client
         foreach (var player in allPlayers)
         {
             NetworkObject netObj = player.GetComponent<NetworkObject>();
@@ -280,7 +325,6 @@ public class NetworkGameManager : NetworkBehaviour
 
         if (localPlayer != null)
         {
-            // Enable camera for local player only
             Camera playerCamera = localPlayer.GetComponentInChildren<Camera>(true);
             if (playerCamera != null)
             {
@@ -288,12 +332,7 @@ public class NetworkGameManager : NetworkBehaviour
                 playerCamera.enabled = true;
                 Debug.Log($"[Client {localClientId}] ✓ Camera enabled");
             }
-            else
-            {
-                Debug.LogWarning($"[Client {localClientId}] Camera not found in player hierarchy!");
-            }
 
-            // Disable cameras on other players
             foreach (var player in allPlayers)
             {
                 if (player != localPlayer)
@@ -307,7 +346,6 @@ public class NetworkGameManager : NetworkBehaviour
                 }
             }
 
-            // Setup cursor
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
@@ -317,22 +355,39 @@ public class NetworkGameManager : NetworkBehaviour
         }
     }
 
+    // ====================== GAME LOOP (SERVER ONLY) ======================
+
     System.Collections.IEnumerator NetworkGameLoop()
     {
-        Debug.Log("[GameLoop] Starting game loop");
+        if (!IsServer) yield break;
+
+        Debug.Log("[GameLoop] Starting game loop on SERVER");
+
+        // ✅ Notify clients that game loop started
+        AnnouncePhaseClientRpc("Game loop started!");
 
         while (GetAlivePlayers().Count > 1)
         {
+            // Phase 1: Revolver Reveal
+            currentPhase.Value = GamePhase.RevolverReveal;
+            yield return StartCoroutine(RevolverPhase());
+
+            // Phase 2: Card Play
             currentPhase.Value = GamePhase.CardPlay;
             yield return StartCoroutine(NetworkTurnPlayPhase());
 
+            // Phase 3: Card Execution
             currentPhase.Value = GamePhase.CardExecution;
             yield return StartCoroutine(NetworkExecuteCardsPhase());
 
+            // Phase 4: Shop
             currentPhase.Value = GamePhase.Shop;
             yield return StartCoroutine(NetworkShopPhase());
 
+            // Phase 5: Draw Cards
+            currentPhase.Value = GamePhase.DrawCards;
             DrawCardsForAllPlayers();
+            
             RoundCleanup();
 
             yield return new WaitForSeconds(1f);
@@ -342,12 +397,42 @@ public class NetworkGameManager : NetworkBehaviour
         GameOver();
     }
 
+    // ✅ THÊM: Announce messages to all clients
+    [ClientRpc]
+    void AnnouncePhaseClientRpc(string message)
+    {
+        Debug.Log($"[Client {NetworkManager.Singleton.LocalClientId}] 📢 {message}");
+    }
+
+    System.Collections.IEnumerator RevolverPhase()
+    {
+        if (!IsServer) yield break;
+
+        Debug.Log("[Server] === Revolver Phase ===");
+        
+        // ✅ Announce to clients
+        AnnouncePhaseClientRpc("Revolver revealing bullets...");
+        
+        if (networkRevolver != null)
+        {
+            networkRevolver.RevealAllSlotsClientRpc();
+        }
+        
+        yield return new WaitForSeconds(2f);
+    }
+
     System.Collections.IEnumerator NetworkTurnPlayPhase()
     {
-        Debug.Log("=== Network Turn Play Phase ===");
+        if (!IsServer) yield break;
+
+        Debug.Log("[Server] === Network Turn Play Phase ===");
+        
+        // ✅ Announce to clients
+        AnnouncePhaseClientRpc($"Card play phase started! ({turnTimer}s)");
+        
         EnableCardSelectionClientRpc(true);
 
-        float timer = 25f;
+        float timer = turnTimer;
         while (timer > 0)
         {
             timer -= Time.deltaTime;
@@ -356,6 +441,9 @@ public class NetworkGameManager : NetworkBehaviour
         }
 
         EnableCardSelectionClientRpc(false);
+        
+        // ✅ Announce end
+        AnnouncePhaseClientRpc("Card play phase ended!");
     }
 
     [ClientRpc]
@@ -363,7 +451,6 @@ public class NetworkGameManager : NetworkBehaviour
     {
         ulong localClientId = NetworkManager.Singleton.LocalClientId;
 
-        // Find local player controller
         NetworkPlayerController[] allPlayers = FindObjectsOfType<NetworkPlayerController>();
         foreach (var player in allPlayers)
         {
@@ -381,12 +468,18 @@ public class NetworkGameManager : NetworkBehaviour
     [ClientRpc]
     void UpdateTimerClientRpc(float timeRemaining)
     {
-        // Update UI timer (implement as needed)
+        // TODO: Update UI timer
+        // timerText.text = $"{timeRemaining:F1}s";
     }
 
     System.Collections.IEnumerator NetworkExecuteCardsPhase()
     {
-        Debug.Log("=== Network Execute Cards Phase ===");
+        if (!IsServer) yield break;
+
+        Debug.Log("[Server] === Network Execute Cards Phase ===");
+        
+        // ✅ Announce to clients
+        AnnouncePhaseClientRpc("Executing cards...");
 
         int startIndex = networkRevolver.targetPlayerIndex.Value;
 
@@ -402,6 +495,11 @@ public class NetworkGameManager : NetworkBehaviour
                     var controller = playerControllers[playerData.Value.clientId];
                     if (controller != null && controller.IsAlive())
                     {
+                        Debug.Log($"[Server] Executing cards for Player {playerIndex}");
+                        
+                        // ✅ Announce current player
+                        AnnouncePhaseClientRpc($"Player {playerIndex} executing cards...");
+                        
                         yield return StartCoroutine(controller.ExecutePlayedCards());
                     }
                 }
@@ -411,23 +509,56 @@ public class NetworkGameManager : NetworkBehaviour
 
     System.Collections.IEnumerator NetworkShopPhase()
     {
-        Debug.Log("=== Network Shop Phase ===");
-        foreach (var player in GetAlivePlayers())
+        if (!IsServer) yield break;
+
+        Debug.Log("[Server] === Network Shop Phase ===");
+        
+        // ✅ Announce to clients
+        AnnouncePhaseClientRpc("Shop is opening...");
+        
+        if (networkShopManager != null)
+        {
+            yield return StartCoroutine(networkShopManager.OpenNetworkShop());
+        }
+        else
         {
             yield return new WaitForSeconds(3f);
         }
+        
+        // ✅ Announce shop closed
+        AnnouncePhaseClientRpc("Shop closed!");
     }
+
+    // ====================== UTILITY METHODS ======================
 
     void DrawCardsForAllPlayers()
     {
-        foreach (var player in GetAlivePlayers())
+        if (!IsServer) return;
+
+        Debug.Log("[Server] Drawing cards for all players...");
+        
+        // ✅ Announce to clients
+        AnnouncePhaseClientRpc("Drawing cards...");
+
+        if (networkDeckManager == null)
         {
-            player.DrawCard();
+            Debug.LogError("[GameManager] NetworkDeckManager not found!");
+            return;
+        }
+
+        foreach (var controller in playerControllers.Values)
+        {
+            if (controller != null && controller.IsAlive())
+            {
+                networkDeckManager.DrawCardServerRpc(controller.OwnerClientId);
+            }
         }
     }
 
     void RoundCleanup()
     {
+        if (!IsServer) return;
+
         foreach (var controller in playerControllers.Values)
         {
             if (controller != null)
@@ -439,10 +570,12 @@ public class NetworkGameManager : NetworkBehaviour
 
     void GameOver()
     {
+        if (!IsServer) return;
+
         var winners = GetAlivePlayers();
         if (winners.Count > 0)
         {
-            Debug.Log($"Game Over! Winner: Player {winners[0].playerId.Value}");
+            Debug.Log($"[Server] Game Over! Winner: Player {winners[0].playerId.Value}");
             ShowGameOverClientRpc(winners[0].playerId.Value);
         }
     }
@@ -450,7 +583,8 @@ public class NetworkGameManager : NetworkBehaviour
     [ClientRpc]
     void ShowGameOverClientRpc(int winnerPlayerId)
     {
-        Debug.Log($"Game Over! Winner: Player {winnerPlayerId}");
+        Debug.Log($"[Client {NetworkManager.Singleton.LocalClientId}] 🎉 Game Over! Winner: Player {winnerPlayerId}");
+        // TODO: Show game over UI
     }
 
     List<NetworkPlayerController> GetAlivePlayers()
@@ -486,5 +620,32 @@ public class NetworkGameManager : NetworkBehaviour
         {
             return (startIndex - offset + networkPlayers.Count) % networkPlayers.Count;
         }
+    }
+
+    public void ChangeRotationDirection()
+    {
+        if (!IsServer) return;
+        
+        clockwiseRotation.Value = !clockwiseRotation.Value;
+        Debug.Log($"[Server] Rotation direction changed to: {(clockwiseRotation.Value ? "Clockwise" : "Counter-clockwise")}");
+    }
+
+    public void LogPlayers()
+    {
+        if (!IsServer) return;
+        
+        Debug.Log("===== Network Player List =====");
+        Debug.Log("Số lượng player: " + networkPlayers.Count);
+
+        for (int i = 0; i < networkPlayers.Count; i++)
+        {
+            var playerData = networkPlayers[i];
+            if (playerControllers.ContainsKey(playerData.clientId))
+            {
+                var controller = playerControllers[playerData.clientId];
+                Debug.Log($"[{i}] ClientID: {playerData.clientId} | PlayerID: {playerData.playerId} | HP: {controller?.currentHP.Value} | Alive: {controller?.IsAlive()}");
+            }
+        }
+        Debug.Log("=======================");
     }
 }
