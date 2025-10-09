@@ -425,31 +425,72 @@ public class NetworkGameManager : NetworkBehaviour
     {
         if (!IsServer) yield break;
 
-        Debug.Log("[Server] === Network Turn Play Phase ===");
+        Debug.Log("[Server] === Network Turn Play Phase (Turn-Based) ===");
         
-        // ✅ Announce to clients
-        AnnouncePhaseClientRpc($"Card play phase started! ({turnTimer}s)");
-        
-        EnableCardSelectionClientRpc(true);
+        // Bắt đầu từ người bị revolver chỉ vào
+        int startIndex = networkRevolver.targetPlayerIndex.Value;
 
-        float timer = turnTimer;
-        while (timer > 0)
+        // Announce to clients
+        AnnouncePhaseClientRpc($"Turn-based card play starting from Player {startIndex}!");
+
+        // Lần lượt từng người chơi
+        for (int i = 0; i < networkPlayers.Count; i++)
         {
-            timer -= Time.deltaTime;
-            UpdateTimerClientRpc(timer);
-            yield return null;
+            int playerIndex = GetNextPlayerIndex(startIndex, i);
+            var playerData = GetPlayerDataByIndex(playerIndex);
+
+            if (!playerData.HasValue) continue;
+
+            if (playerControllers.ContainsKey(playerData.Value.clientId))
+            {
+                var controller = playerControllers[playerData.Value.clientId];
+                
+                if (controller == null || !controller.IsAlive())
+                {
+                    Debug.Log($"[Server] Player {playerIndex} is dead, skipping turn");
+                    continue;
+                }
+
+                // ✅ Announce current player's turn
+                AnnouncePhaseClientRpc($"Player {playerIndex}'s turn!");
+                NotifyPlayerTurnClientRpc(playerData.Value.clientId, true);
+
+                Debug.Log($"[Server] --- Player {playerIndex} turn ---");
+
+                // ✅ Chỉ enable cho người chơi hiện tại
+                EnableCardSelectionForPlayerClientRpc(playerData.Value.clientId, true);
+
+                // ✅ Countdown timer cho người chơi này
+                float timer = turnTimer;
+                while (timer > 0)
+                {
+                    timer -= Time.deltaTime;
+                    UpdateTimerClientRpc(timer);
+                    yield return null;
+                }
+
+                // ✅ Disable cho người chơi này
+                EnableCardSelectionForPlayerClientRpc(playerData.Value.clientId, false);
+                NotifyPlayerTurnClientRpc(playerData.Value.clientId, false);
+
+                Debug.Log($"[Server] Player {playerIndex} turn ended");
+
+                // ✅ Ngắt giữa các lượt
+                yield return new WaitForSeconds(0.5f);
+            }
         }
 
-        EnableCardSelectionClientRpc(false);
-        
-        // ✅ Announce end
-        AnnouncePhaseClientRpc("Card play phase ended!");
+        // ✅ Announce phase ended
+        AnnouncePhaseClientRpc("All players have played their cards!");
     }
 
     [ClientRpc]
-    void EnableCardSelectionClientRpc(bool enable)
+    void EnableCardSelectionForPlayerClientRpc(ulong targetClientId, bool enable)
     {
         ulong localClientId = NetworkManager.Singleton.LocalClientId;
+
+        // Chỉ client được chỉ định mới xử lý
+        if (localClientId != targetClientId) return;
 
         NetworkPlayerController[] allPlayers = FindObjectsOfType<NetworkPlayerController>();
         foreach (var player in allPlayers)
@@ -464,6 +505,30 @@ public class NetworkGameManager : NetworkBehaviour
             }
         }
     }
+
+    // ✅ NEW: Notify player về turn của họ (for UI highlight)
+    [ClientRpc]
+    void NotifyPlayerTurnClientRpc(ulong targetClientId, bool isTheirTurn)
+    {
+        ulong localClientId = NetworkManager.Singleton.LocalClientId;
+
+        if (localClientId == targetClientId)
+        {
+            // Đây là turn của bạn!
+            Debug.Log($"[Client {localClientId}] 🎯 IT'S YOUR TURN!");
+            // TODO: Show "YOUR TURN" UI
+            // turnIndicatorText.text = "YOUR TURN!";
+            // turnIndicatorPanel.SetActive(isTheirTurn);
+        }
+        else
+        {
+            // Đang là turn của người khác
+            Debug.Log($"[Client {localClientId}] Waiting for other player...");
+            // TODO: Show "WAITING" UI
+            // turnIndicatorText.text = "Waiting...";
+        }
+}
+
 
     [ClientRpc]
     void UpdateTimerClientRpc(float timeRemaining)

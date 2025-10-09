@@ -241,7 +241,7 @@ MonoBehaviour:
   maxPlayers: 4
   startingHP: 5
   startingCards: 2
-  turnTimer: 25
+  turnTimer: 15
   networkPlayerPrefab: {fileID: 5690733904030198616, guid: e70921262c2dfe1438d35817a3ff33db, type: 3}
   networkRevolverPrefab: {fileID: 15551126}
   cardPrefab: {fileID: 6832097838684503718, guid: f58c72a50c94c404280be3edd7129669, type: 3}
